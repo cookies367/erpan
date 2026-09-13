@@ -150,7 +150,8 @@ class VoiceService : Service() {
                     flow.speechStarted()
                 } }, { pcm -> child.launch { VoiceDiagnostics.record("silence_segment_ready"); flow.submit(pcm) } }, {
                     ready.complete(Unit)
-                }, acceptInput = flow::acceptsSpeech)
+                }, acceptInput = flow::acceptsSpeech,
+                   confirmFrames = { if (player.get() != null) 12 else 3 })
             } catch (cancelled: CancellationException) { ready.cancel(); throw cancelled }
             catch (error: Exception) {
                 val wasReady = ready.isCompleted && !ready.isCancelled

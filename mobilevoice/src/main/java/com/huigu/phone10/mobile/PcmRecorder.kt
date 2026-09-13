@@ -33,7 +33,7 @@ class PcmRecorder(context: Context) {
 
     @SuppressLint("MissingPermission") // Foreground owner checks RECORD_AUDIO before invoking run.
     suspend fun run(onSpeechStart: () -> Unit, onUtterance: (ByteArray) -> Unit, onReady: () -> Unit = {},
-                    acceptInput: () -> Boolean = { true }) = withContext(Dispatchers.IO) {
+                    acceptInput: () -> Boolean = { true }, confirmFrames: () -> Int = { 3 }) = withContext(Dispatchers.IO) {
         check(started.compareAndSet(false, true)) { "录音已启动。" }
         try {
             // Segmentation below owns minimum speech and trailing silence exactly once.
@@ -107,7 +107,7 @@ internal class UtteranceSegmenter {
     private var waitingForSilence = false
 
     fun accept(frame: ByteArray, speech: Boolean, onStart: () -> Unit, onUtterance: (ByteArray) -> Unit,
-               acceptInput: Boolean = true) {
+               acceptInput: Boolean = true, confirm: Int = 3) {
         check(!failed) { "录音已停止。" }
         require(frame.size == 1024) { "录音帧大小无效。" }
         if (!acceptInput) {
@@ -125,7 +125,7 @@ internal class UtteranceSegmenter {
             preRoll.addLast(frame.copyOf())
             while (preRoll.size > 10) preRoll.removeFirst() // 320 ms includes onset confirmation.
             speechFrames = if (speech) speechFrames + 1 else 0
-            if (speechFrames < 3) return // 96 ms of consecutive human speech rejects isolated noise.
+            if (speechFrames < confirm) return // consecutive frames required; 3 frames = 96 ms, playback uses longer debounce.
             active = true
             preRoll.forEach { utterance.write(it) }
             preRoll.clear()
