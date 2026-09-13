@@ -29,11 +29,18 @@ internal class ElevenLabsSpeech(
         .callTimeout(90, TimeUnit.SECONDS).build()
 
     suspend fun speakStream(texts: ReceiveChannel<String>, onPcm: (ByteArray) -> Unit) {
-        // 逐句取文字，每句发一次 HTTP 请求
+        // 逐句取文字，每句发一次 HTTP 请求。
+        // 单句合成失败只跳过该句，不能让整轮回复作废（否则会把 Operit 的回复流也掐断）。
         for (text in texts) {
             currentCoroutineContext().ensureActive()
             if (text.isBlank()) continue
-            synthesize(text, onPcm)
+            try {
+                synthesize(text, onPcm)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                VoiceDiagnostics.record("eleven_sentence_skipped")
+            }
         }
     }
 

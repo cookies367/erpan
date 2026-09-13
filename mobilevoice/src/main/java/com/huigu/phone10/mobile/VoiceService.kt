@@ -221,17 +221,32 @@ class VoiceService : Service() {
             }, Handler(Looper.getMainLooper())).build()
         // Capture continues while a muted game owns focus. Request it only for real PCM.
         audio.mode = AudioManager.MODE_IN_COMMUNICATION
-        val personalOutput = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+        // 有耳机类设备（含蓝牙 A2DP/BLE）时优先路由到耳机，不再强制外放。
+        // A2DP 走媒体通道即可出声，不需要耳机支持 SCO 通话。
+        val outputs = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        val personalOutput = outputs.any {
             it.type in setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-                AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE) ||
-                (Build.VERSION.SDK_INT >= 31 && it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+                AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_DEVICE)
         }
-        if (!personalOutput) {
+        if (personalOutput) {
             if (Build.VERSION.SDK_INT >= 31) audio.availableCommunicationDevices
-                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                .firstOrNull { it.type in setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET) }
                 ?.let { selectedSpeaker = audio.setCommunicationDevice(it) }
-            else { audio.isSpeakerphoneOn = true; selectedSpeaker = true }
+        } else {
+            val bluetooth = if (Build.VERSION.SDK_INT >= 31) audio.availableCommunicationDevices.firstOrNull {
+                it.type in setOf(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET,
+                    AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+            } else null
+            if (bluetooth != null) {
+                selectedSpeaker = audio.setCommunicationDevice(bluetooth)
+                VoiceDiagnostics.record(if (selectedSpeaker) "bt_route_set" else "bt_route_failed")
+            } else {
+                // 没有任何耳机设备：才回落到外放
+                if (Build.VERSION.SDK_INT >= 31) audio.availableCommunicationDevices
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    ?.let { selectedSpeaker = audio.setCommunicationDevice(it) }
+                else { audio.isSpeakerphoneOn = true; selectedSpeaker = true }
+            }
         }
     }
 
