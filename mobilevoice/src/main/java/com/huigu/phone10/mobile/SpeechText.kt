@@ -61,7 +61,7 @@ class SpeechText(private val preserveSpacing: Boolean = false,
         val match = Regex("^<\\s*(/?)\\s*([A-Za-z][A-Za-z0-9_:-]*)").find(raw) ?: return
         val name = match.groupValues[2].lowercase()
         val isHidden = name in setOf("think", "thinking", "analysis", "reasoning", "tool", "tools", "function", "status",
-            "metric", "badge", "silent", "meme", "sticker", "img", "br", "details", "summary") ||
+            "metric", "badge", "silent", "meme", "sticker", "img", "br", "details", "summary", "html") ||
             name.startsWith("tool_") || name.startsWith("function_")
         if (match.groupValues[1] == "/") {
             val index = hidden.lastIndexOf(name)
