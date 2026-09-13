@@ -31,6 +31,8 @@ data class MobileSettings(
     val voiceName: String? = null,
     val disableVoiceInterruption: Boolean = false,
     val enableOmniHints: Boolean = false,
+    // 听感分析使用的百炼模型名。旧配置没有这个字段，Gson 会置空，所以保持可空、由调用方兜底默认值。
+    val omniModel: String? = null,
     val sttPresets: List<SpeechPreset> = emptyList(),
     val ttsPresets: List<SpeechPreset> = emptyList(),
 )

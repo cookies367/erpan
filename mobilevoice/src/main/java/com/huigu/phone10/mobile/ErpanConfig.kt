@@ -81,9 +81,15 @@ import kotlinx.coroutines.delay
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("百炼 Omni 深度听感分析", fontSize = 14.sp)
-                        Hint("录音结束后调用 qwen-omni 分析说话人语气、情绪与背景音，并拼入线索。")
+                        Hint("录音结束后调用百炼 Omni 分析说话人语气、情绪与背景音，并拼入声音线索附件。")
                     }
                     Switch(checked = settings.enableOmniHints, onCheckedChange = { onChange(settings.copy(enableOmniHints = it)) }, enabled = enabled)
+                }
+                if (settings.enableOmniHints) {
+                    FormField("Omni 模型名", settings.omniModel.orEmpty(), enabled, placeholder = OmniAudioJudge.DEFAULT_MODEL) {
+                        onChange(settings.copy(omniModel = it.trim()))
+                    }
+                    Hint("留空使用默认 ${OmniAudioJudge.DEFAULT_MODEL}；也可改 qwen3-omni-flash 等。与识别共用同一个百炼 API Key。")
                 }
 
                 ConfigDivider()

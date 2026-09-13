@@ -17,7 +17,7 @@ class VoiceConversation(
     private val judgeEnd: (suspend (String)->Boolean?)? = null,
     private val continuationMillis: Long = 1500,
     private val transcribeDetailed: (suspend (ByteArray)->SpeechTranscript)? = null,
-    private val omniJudge: (suspend (ByteArray)->String?)? = null,
+    private val omniJudge: (suspend (ByteArray)->OmniOutcome)? = null,
 ) {
     @Volatile private var active: Job? = null
     @Volatile private var voiceInterruptionEnabled = true
@@ -62,13 +62,21 @@ class VoiceConversation(
                     }
                 }
                 currentCoroutineContext().ensureActive()
-                val omniHint = omniJudge?.let {
+                val omni = omniJudge?.let {
                     report("正在深度分析语气与背景…")
                     it.invoke(recording)
                 }
+                // 失败时把原因记进诊断日志（短标签 + 服务端错误片段），方便一次定位参数问题。
+                if (omni != null) VoiceDiagnostics.record(
+                    if (omni.ok) "omni_ok"
+                    else "omni_failed:" + (omni.error ?: "unknown") + (omni.detail?.let { " " + it.take(80) } ?: ""))
                 pendingPcm = byteArrayOf()
-                report(if (unavailable) "智能判断不可用，已按静音提交；等待 Operit 回复…" else "等待 Operit 回复…")
-                streamReply(transcript.forChat(extraHints = listOfNotNull(omniHint)))
+                report(when {
+                    omni != null && !omni.ok -> "听感分析失败（${omni.error ?: "未知"}），已按普通线索提交；等待 Operit 回复…"
+                    unavailable -> "智能判断不可用，已按静音提交；等待 Operit 回复…"
+                    else -> "等待 Operit 回复…"
+                })
+                streamReply(transcript.forChat(extraHints = listOfNotNull(omni?.hint)))
                 report(if (judgeEnd == null) "正在聆听 · 约 0.55 秒静音提交" else "正在聆听 · 智能结束判断")
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: TurnFailure) {

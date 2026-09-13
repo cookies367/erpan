@@ -124,7 +124,11 @@ class VoiceService : Service() {
         val cloud = CloudSpeech(config.speech)
         val o = OperitBridge(this).also { bridge = it }
         val judge = if (config.smartEndpoint) CloudEndJudge(requireNotNull(config.endJudge)) else null
-        val omni = if (config.enableOmniHints && config.speech.sttKey.isNotBlank()) OmniAudioJudge(config.speech.sttKey) else null
+        val omniModel = config.omniModel?.takeIf { it.isNotBlank() } ?: OmniAudioJudge.DEFAULT_MODEL
+        val omni = if (config.enableOmniHints && config.speech.sttKey.isNotBlank())
+            OmniAudioJudge(config.speech.sttKey, omniModel) else null
+        // 开了开关但没有百炼 Key 时留一条痕迹，避免“开了没反应”查不出原因。
+        if (config.enableOmniHints && omni == null) VoiceDiagnostics.record("omni_skipped:no_key")
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Phone10Mobile:call").also { it.acquire() }
         val flow = VoiceConversation(child, cloud::transcribe,

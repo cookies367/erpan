@@ -38,7 +38,14 @@ class SpeechTranscript(
             hints += "句段疑似${name}情感（服务商置信度 ${String.format(Locale.ROOT, "%.0f", confidence * 100)}%）"
         }
         if (hints.isEmpty()) return spoken
-        return "$spoken\n\n[耳畔声音线索：自动估计，仅供参考，不代表用户自述或确定的心理状态。${hints.joinToString("；")}。]"
+        // 以 Operit 官方附件标签块输出：模型侧等同“随这条消息附带的一个附件”，
+        // 不再混在用户说话内容里；该标签块在 Operit 做长期记忆归档时会被自动剥离。
+        val body = buildString {
+            appendLine("自动估计，仅供参考，不代表用户自述或确定的心理状态。")
+            for (hint in hints) appendLine("- " + hint.replace("</attachment>", "").trim())
+        }.trimEnd()
+        return "$spoken\n\n<attachment id=\"erpan-voice-hint\" type=\"voice_hint\" " +
+            "filename=\"耳畔声音线索.txt\" size=\"0\">\n$body\n</attachment>"
     }
 
     companion object {
