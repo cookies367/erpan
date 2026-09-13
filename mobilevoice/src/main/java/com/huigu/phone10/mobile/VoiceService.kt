@@ -124,6 +124,7 @@ class VoiceService : Service() {
         val cloud = CloudSpeech(config.speech)
         val o = OperitBridge(this).also { bridge = it }
         val judge = if (config.smartEndpoint) CloudEndJudge(requireNotNull(config.endJudge)) else null
+        val omni = if (config.enableOmniHints && config.speech.sttKey.isNotBlank()) OmniAudioJudge(config.speech.sttKey) else null
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Phone10Mobile:call").also { it.acquire() }
         val flow = VoiceConversation(child, cloud::transcribe,
@@ -137,7 +138,8 @@ class VoiceService : Service() {
                     output.write(pcm)
                 } }
             } else null, judgeEnd = judge?.let { it::isComplete },
-            transcribeDetailed = cloud::transcribeDetailed).also {
+            transcribeDetailed = cloud::transcribeDetailed,
+            omniJudge = omni?.let { it::analyze }).also {
                 it.setVoiceInterruptionEnabled(!config.disableVoiceInterruption)
                 conversation = it
             }

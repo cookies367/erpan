@@ -1,7 +1,7 @@
 package com.huigu.phone10.mobile
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -38,69 +38,133 @@ import kotlinx.coroutines.delay
     }
     val speech = settings.speech
     val ttsProvider = speech.effectiveTtsProvider
+
+    // 折叠状态记忆
+    var chatExpanded by remember { mutableStateOf(true) }
+    var sttExpanded by remember { mutableStateOf(true) }
+    var ttsExpanded by remember { mutableStateOf(true) }
+    var judgeExpanded by remember { mutableStateOf(settings.smartEndpoint) }
+
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
         PageHeading("连接配置", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(15.dp)) {
-            Text("填好服务信息，就可以开始通话", color = ErpanColors.Muted, fontSize = 13.sp)
+            Text("按需展开分组配置，点击标题即可折叠", color = ErpanColors.Muted, fontSize = 13.sp)
             if (!enabled) Text("通话中可查看配置；结束语音后再修改。", color = ErpanColors.Rose, fontSize = 13.sp)
             if (notice.isNotBlank()) Text(notice, color = ErpanColors.Rose, fontSize = 13.sp)
-            Spacer(Modifier.height(6.dp))
-            SectionTitle("聊天连接")
-            ErpanNavigationCard("选中聊天窗口", subtitle = if (listing) "正在读取…" else settings.displayChat(),
-                enabled = enabled && !listing, onClick = onChats)
-            Hint("聊天模型、角色和历史在 Operit 中设置")
-            ConfigDivider()
-            SectionTitle("语音识别")
-            ProviderField("服务商", speech.provider ?: SpeechConfig.OPENAI, enabled,
-                listOf(SpeechConfig.BAILIAN to "阿里云百炼", SpeechConfig.OPENAI to "Audio API 兼容"), onStt)
-            FormField("识别接口地址", speech.sttBaseUrl, enabled, placeholder = "填写识别服务的地址") { onChange(settings.copy(speech = speech.copy(sttBaseUrl = it.trim()))) }
-            FormField("识别 API Key", speech.sttKey, enabled, secret = true,
-                placeholder = if (speech.isBailian) "填写百炼 API Key" else "填写识别服务的 API Key") { onChange(settings.copy(speech = speech.copy(sttKey = it.trim()))) }
-            FormField("识别模型", speech.sttModel, enabled) { onChange(settings.copy(speech = speech.copy(sttModel = it.trim()))) }
-            Hint(if (speech.isBailian) "地址、密钥和模型需属于同一地域。百炼识别使用 Paraformer 协议。" else "服务需支持 Audio API 语音识别接口。")
-            // 识别预设区块
-            ConfigDivider()
-            PresetSection("识别预设", settings.sttPresets, enabled, onSaveSttPreset, onApplySttPreset, onDeleteSttPreset)
-            ConfigDivider()
-            SectionTitle("语音合成")
-            ProviderField("服务商", ttsProvider, enabled,
-                listOf(SpeechConfig.BAILIAN to "阿里云百炼", SpeechConfig.MINIMAX to "MiniMax 官方", SpeechConfig.ELEVENLABS to "ElevenLabs", SpeechConfig.OPENAI to "Audio API 兼容"), onTts)
-            if (ttsProvider == SpeechConfig.MINIMAX) Hint("填写 MiniMax 官方 Key 和音色 ID；百炼 Key 不适用。此接法尚待真实账号验证。")
-            if (ttsProvider == SpeechConfig.ELEVENLABS) Hint("填写 ElevenLabs API Key 和音色 ID；地址可用官方或中转域名。")
-            FormField("合成接口地址", speech.ttsBaseUrl, enabled, placeholder = "填写合成服务的地址") { onChange(settings.copy(speech = speech.copy(ttsBaseUrl = it.trim()))) }
-            FormField("合成 API Key", speech.ttsKey, enabled, secret = true,
-                placeholder = when (ttsProvider) { SpeechConfig.BAILIAN -> "填写百炼 API Key"; SpeechConfig.MINIMAX -> "填写 MiniMax 官方 Key"; SpeechConfig.ELEVENLABS -> "填写 ElevenLabs API Key"; else -> "填写合成服务的 API Key" }) {
-                onChange(settings.copy(speech = speech.copy(ttsKey = it.trim())))
+            Spacer(Modifier.height(4.dp))
+
+            // ① 目标聊天折叠卡片
+            CollapsibleCard(title = "目标聊天与连接", expanded = chatExpanded, onToggle = { chatExpanded = !chatExpanded }) {
+                ErpanNavigationCard("选中聊天窗口", subtitle = if (listing) "正在读取…" else settings.displayChat(),
+                    enabled = enabled && !listing, onClick = onChats)
+                Hint("聊天模型、角色和历史在 Operit 中设置")
             }
-            if (speech.isBailian && ttsProvider == SpeechConfig.BAILIAN) TextButton(enabled = enabled, onClick = {
-                onChange(settings.copy(speech = speech.copy(ttsBaseUrl = speech.sttBaseUrl, ttsKey = speech.sttKey)))
-            }, contentPadding = PaddingValues(0.dp)) { Text("使用上面的百炼识别地址和密钥", fontSize = 12.sp) }
-            FormField("合成模型", speech.ttsModel, enabled) { onChange(settings.copy(speech = speech.copy(ttsModel = it.trim()))) }
-            Column(Modifier.bringIntoViewRequester(voiceTarget), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                FormField("音色 ID", speech.voice, enabled, placeholder = "粘贴服务商提供的音色 ID") {
-                    onChange(settings.copy(speech = speech.copy(voice = it.trim()), voiceName = null))
+
+            // ② 语音识别折叠卡片
+            CollapsibleCard(title = "语音识别 (STT) 与听感", expanded = sttExpanded, onToggle = { sttExpanded = !sttExpanded }) {
+                ProviderField("识别服务商", speech.provider ?: SpeechConfig.OPENAI, enabled,
+                    listOf(SpeechConfig.BAILIAN to "阿里云百炼", SpeechConfig.OPENAI to "Audio API 兼容"), onStt)
+                FormField("识别接口地址", speech.sttBaseUrl, enabled, placeholder = "填写识别服务的地址") {
+                    onChange(settings.copy(speech = speech.copy(sttBaseUrl = it.trim())))
                 }
-                FormField("音色名称（选填）", settings.voiceName.orEmpty(), enabled, placeholder = "给这个声音起个名字") {
-                    onChange(settings.copy(voiceName = it.take(80)))
+                FormField("识别 API Key", speech.sttKey, enabled, secret = true,
+                    placeholder = if (speech.isBailian) "填写百炼 API Key" else "填写识别服务的 API Key") {
+                    onChange(settings.copy(speech = speech.copy(sttKey = it.trim())))
                 }
-                Hint("名称仅用于首页显示，不改变音色。音色 ID 须匹配所选服务和模型。")
+                FormField("识别模型", speech.sttModel, enabled) {
+                    onChange(settings.copy(speech = speech.copy(sttModel = it.trim())))
+                }
+                Hint(if (speech.isBailian) "地址、密钥和模型需属于同一地域。百炼识别使用 Paraformer 协议。" else "服务需支持 Audio API 语音识别接口。")
+
+                // Omni 深度听感开关
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("百炼 Omni 深度听感分析", fontSize = 14.sp)
+                        Hint("录音结束后调用 qwen-omni 分析说话人语气、情绪与背景音，并拼入线索。")
+                    }
+                    Switch(checked = settings.enableOmniHints, onCheckedChange = { onChange(settings.copy(enableOmniHints = it)) }, enabled = enabled)
+                }
+
+                ConfigDivider()
+                PresetSection("识别预设", settings.sttPresets, enabled, onSaveSttPreset, onApplySttPreset, onDeleteSttPreset)
             }
-            // 合成预设区块
-            ConfigDivider()
-            PresetSection("合成预设", settings.ttsPresets, enabled, onSaveTtsPreset, onApplyTtsPreset, onDeleteTtsPreset)
-            if (settings.smartEndpoint) Column(Modifier.bringIntoViewRequester(judgeTarget), verticalArrangement = Arrangement.spacedBy(15.dp)) {
-                ConfigDivider(); SectionTitle("智能结束判断")
-                Hint("此项额外调用文本模型，按该服务计费；关闭开关后不调用。")
-                val judge = settings.endJudge ?: EndJudgeConfig()
-                FormField("判断接口地址", judge.baseUrl, enabled) { onChange(settings.copy(endJudge = judge.copy(baseUrl = it.trim()))) }
-                FormField("判断 API Key", judge.key, enabled, secret = true) { onChange(settings.copy(endJudge = judge.copy(key = it.trim()))) }
-                FormField("判断模型", judge.model, enabled) { onChange(settings.copy(endJudge = judge.copy(model = it.trim()))) }
+
+            // ③ 语音合成折叠卡片
+            CollapsibleCard(title = "语音合成 (TTS) 与音色", expanded = ttsExpanded, onToggle = { ttsExpanded = !ttsExpanded }) {
+                ProviderField("合成服务商", ttsProvider, enabled,
+                    listOf(SpeechConfig.BAILIAN to "阿里云百炼", SpeechConfig.MINIMAX to "MiniMax 官方", SpeechConfig.ELEVENLABS to "ElevenLabs", SpeechConfig.OPENAI to "Audio API 兼容"), onTts)
+                if (ttsProvider == SpeechConfig.MINIMAX) Hint("填写 MiniMax 官方 Key 和音色 ID；百炼 Key 不适用。")
+                if (ttsProvider == SpeechConfig.ELEVENLABS) Hint("填写 ElevenLabs API Key 和音色 ID；地址可用官方或中转域名。")
+                FormField("合成接口地址", speech.ttsBaseUrl, enabled, placeholder = "填写合成服务的地址") {
+                    onChange(settings.copy(speech = speech.copy(ttsBaseUrl = it.trim())))
+                }
+                FormField("合成 API Key", speech.ttsKey, enabled, secret = true,
+                    placeholder = when (ttsProvider) { SpeechConfig.BAILIAN -> "填写百炼 API Key"; SpeechConfig.MINIMAX -> "填写 MiniMax 官方 Key"; SpeechConfig.ELEVENLABS -> "填写 ElevenLabs API Key"; else -> "填写合成服务的 API Key" }) {
+                    onChange(settings.copy(speech = speech.copy(ttsKey = it.trim())))
+                }
+                if (speech.isBailian && ttsProvider == SpeechConfig.BAILIAN) TextButton(enabled = enabled, onClick = {
+                    onChange(settings.copy(speech = speech.copy(ttsBaseUrl = speech.sttBaseUrl, ttsKey = speech.sttKey)))
+                }, contentPadding = PaddingValues(0.dp)) { Text("使用上面的百炼识别地址和密钥", fontSize = 12.sp) }
+                FormField("合成模型", speech.ttsModel, enabled) { onChange(settings.copy(speech = speech.copy(ttsModel = it.trim()))) }
+                Column(Modifier.bringIntoViewRequester(voiceTarget), verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                    FormField("音色 ID", speech.voice, enabled, placeholder = "粘贴服务商提供的音色 ID") {
+                        onChange(settings.copy(speech = speech.copy(voice = it.trim()), voiceName = null))
+                    }
+                    FormField("音色名称（选填）", settings.voiceName.orEmpty(), enabled, placeholder = "给这个声音起个名字") {
+                        onChange(settings.copy(voiceName = it.take(80)))
+                    }
+                    Hint("名称仅用于首页显示，不改变音色。音色 ID 须匹配所选服务和模型。")
+                }
+                ConfigDivider()
+                PresetSection("合成预设", settings.ttsPresets, enabled, onSaveTtsPreset, onApplyTtsPreset, onDeleteTtsPreset)
             }
+
+            // ④ 智能判断折叠卡片（仅当开启或有配置时）
+            if (settings.smartEndpoint) {
+                CollapsibleCard(title = "智能结束判断", expanded = judgeExpanded, onToggle = { judgeExpanded = !judgeExpanded }) {
+                    Column(Modifier.bringIntoViewRequester(judgeTarget), verticalArrangement = Arrangement.spacedBy(15.dp)) {
+                        Hint("此项额外调用文本模型判断是否说完，按该服务计费。")
+                        val judge = settings.endJudge ?: EndJudgeConfig()
+                        FormField("判断接口地址", judge.baseUrl, enabled) { onChange(settings.copy(endJudge = judge.copy(baseUrl = it.trim()))) }
+                        FormField("判断 API Key", judge.key, enabled, secret = true) { onChange(settings.copy(endJudge = judge.copy(key = it.trim()))) }
+                        FormField("判断模型", judge.model, enabled) { onChange(settings.copy(endJudge = judge.copy(model = it.trim()))) }
+                    }
+                }
+            }
+
             Button(onClick = onSave, enabled = enabled && !listing, shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth().padding(top = 7.dp).heightIn(min = 50.dp)) { Text("保存配置", fontSize = 17.sp) }
             Hint("密钥加密保存在本机。识别、合成及可选判断的费用由相应服务商结算。")
             TextButton(onClick = onAbout, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("关于耳畔") }
+        }
+    }
+}
+
+@Composable private fun CollapsibleCard(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        color = ErpanColors.Paper,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(0.8.dp, ErpanColors.Line),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onToggle),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, Modifier.weight(1f), fontSize = 17.sp, fontFamily = FontFamily.Serif)
+                Text(if (expanded) "收起 ▲" else "展开 ▼", fontSize = 13.sp, color = ErpanColors.Rose)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(14.dp))
+                content()
+            }
         }
     }
 }
@@ -163,7 +227,7 @@ import kotlinx.coroutines.delay
 ) {
     SectionTitle(title)
     if (presets.isEmpty()) {
-        Hint("尚无预设。填好下面的配置后点「存为预设」即可保存。")
+        Hint("尚无预设。填好上面的配置后点「存为预设」即可保存。")
     } else {
         presets.forEachIndexed { index, preset ->
             Surface(color = ErpanColors.Paper, shape = RoundedCornerShape(9.dp),

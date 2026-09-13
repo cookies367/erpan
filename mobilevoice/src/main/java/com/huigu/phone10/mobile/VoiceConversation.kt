@@ -17,6 +17,7 @@ class VoiceConversation(
     private val judgeEnd: (suspend (String)->Boolean?)? = null,
     private val continuationMillis: Long = 1500,
     private val transcribeDetailed: (suspend (ByteArray)->SpeechTranscript)? = null,
+    private val omniJudge: (suspend (ByteArray)->String?)? = null,
 ) {
     @Volatile private var active: Job? = null
     @Volatile private var voiceInterruptionEnabled = true
@@ -61,9 +62,13 @@ class VoiceConversation(
                     }
                 }
                 currentCoroutineContext().ensureActive()
+                val omniHint = omniJudge?.let {
+                    report("正在深度分析语气与背景…")
+                    it.invoke(recording)
+                }
                 pendingPcm = byteArrayOf()
                 report(if (unavailable) "智能判断不可用，已按静音提交；等待 Operit 回复…" else "等待 Operit 回复…")
-                streamReply(transcript.forChat())
+                streamReply(transcript.forChat(extraHints = listOfNotNull(omniHint)))
                 report(if (judgeEnd == null) "正在聆听 · 约 0.55 秒静音提交" else "正在聆听 · 智能结束判断")
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: TurnFailure) {

@@ -9,10 +9,11 @@ class SpeechTranscript(
     private val spans: List<Pair<Long, Long>> = emptyList(),
     private val emotions: Map<String, Double> = emptyMap(),
 ) {
-    fun forChat(includeVoiceHints: Boolean = ENABLE_VOICE_HINTS): String {
+    fun forChat(includeVoiceHints: Boolean = ENABLE_VOICE_HINTS, extraHints: List<String> = emptyList()): String {
         val spoken = text.trim()
         if (!includeVoiceHints || spoken.isEmpty()) return spoken
         val hints = mutableListOf<String>()
+        hints.addAll(extraHints)
         val ordered = spans.sortedBy { it.first }
         if (ordered.isNotEmpty()) {
             val duration = ordered.maxOf { it.second } - ordered.first().first

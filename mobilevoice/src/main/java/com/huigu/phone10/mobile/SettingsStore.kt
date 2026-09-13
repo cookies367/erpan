@@ -30,6 +30,7 @@ data class MobileSettings(
     val endJudge: EndJudgeConfig? = null,
     val voiceName: String? = null,
     val disableVoiceInterruption: Boolean = false,
+    val enableOmniHints: Boolean = false,
     val sttPresets: List<SpeechPreset> = emptyList(),
     val ttsPresets: List<SpeechPreset> = emptyList(),
 )

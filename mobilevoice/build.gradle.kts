@@ -9,6 +9,14 @@ plugins {
 android {
     namespace = "com.huigu.phone10.mobile"
     compileSdk = 36
+    signingConfigs {
+        create("release") {
+            storeFile = file("erpan-ci.keystore")
+            storePassword = "erpan123"
+            keyAlias = "erpan"
+            keyPassword = "erpan123"
+        }
+    }
     defaultConfig {
         applicationId = "com.huigu.phone10.mobile"
         minSdk = 26
@@ -22,6 +30,15 @@ android {
     }
     kotlinOptions { jvmTarget = "1.8" }
     buildFeatures { compose = true }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("release")
+        }
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
 
 dependencies {
