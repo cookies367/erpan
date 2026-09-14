@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "toolpkg_id": "com.huigu.phone10.erpan_voice_hint",
+  "version": "0.1.0",
+  "main": "dist/main.js",
+  "display_name": {
+    "zh": "耳畔声音线索卡片",
+    "en": "Erpan Voice Hint Card"
+  },
+  "description": {
+    "zh": "拦截耳畔发送的消息中 <!--ERPAN_HINT--> 标记，将其转换为宿主认可的附件卡片。",
+    "en": "Intercept <!--ERPAN_HINT--> markers in messages from Erpan and convert them into host-recognized attachment cards."
+  },
+  "enabled_by_default": true,
+  "subpackages": []
+}
