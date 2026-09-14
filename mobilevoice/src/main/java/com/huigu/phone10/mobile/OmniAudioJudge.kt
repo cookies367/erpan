@@ -18,7 +18,7 @@ import kotlin.coroutines.resume
 /**
  * 听感分析结果。
  * hint：模型给出的语气/情绪/背景音结论（成功时非空）。
- * error：给界面看的短原因码，例如 http_400 / empty_result / timeout。
+ * error：给界面看的短原因码，例如 http_400 / api_error / empty_result / timeout。
  * detail：服务端响应片段，只写入诊断日志，用于定位参数或格式差异。
  */
 data class OmniOutcome(
@@ -31,10 +31,14 @@ data class OmniOutcome(
 
 /**
  * 百炼 Omni 多模态音频分析器。
- * 百炼规定 Qwen-Omni 的所有请求必须 stream=true，因此这里按 SSE 流式读取，
- * 拿到足够文字后立即掐断连接。
- * 响应格式在不同模型版本间有差异，所以同时兼容 delta.content、
- * delta.audio.transcript 与一次性 JSON 两种形态；空结果时会换一组参数重试一次。
+ *
+ * 两个必须遵守的点（均为实测结论，改动前请先复测）：
+ * 1. Qwen-Omni 的所有请求必须 stream=true，因此这里按 SSE 流式读取，
+ *    拿到足够文字后立即掐断连接。
+ * 2. 内联音频必须写成 data URL（data:audio/wav;base64,...）。只给裸 base64 时，
+ *    短音频（1 秒左右）能侥幸通过，超过约 2 秒就会被服务端当成 URL 解析并报
+ *    "<400> InvalidParameter: The provided URL does not appear to be valid"，
+ *    这正是此前每次说话都分析失败的原因。
  */
 class OmniAudioJudge(
     private val apiKey: String,
@@ -59,18 +63,10 @@ class OmniAudioJudge(
         } catch (_: Exception) {
             return OmniOutcome(error = "encode")
         }
-        val first = withTimeoutOrNull(6000) { call(base64Wav, withModalities = true) }
-            ?: return OmniOutcome(error = "timeout")
-        if (first.ok) return first
-        if (first.error !in RETRYABLE) return first
-        // 空结果：去掉 modalities 参数再试一次，覆盖不同模型版本对输出模态的处理差异。
-        val second = withTimeoutOrNull(6000) { call(base64Wav, withModalities = false) }
-            ?: return first
-        if (second.ok) {
-            Log.d(TAG, "retry_without_modalities=ok")
-            return second
-        }
-        return first.copy(detail = listOfNotNull(first.detail, "retry:${second.error}").joinToString(" | "))
+        // 只请求一次：不带 modalities 的写法已被实测证明必然失败（服务端会把音频当 URL），
+        // 保留重试只会让用户说完话后多等几秒。
+        return withTimeoutOrNull(8000) { call(base64Wav, withModalities = true) }
+            ?: OmniOutcome(error = "timeout")
     }
 
     private suspend fun call(base64Wav: String, withModalities: Boolean): OmniOutcome =
@@ -101,7 +97,7 @@ class OmniAudioJudge(
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         if (!response.isSuccessful) {
-                            val snippet = try { response.body?.string()?.take(160) } catch (_: Exception) { null }
+                            val snippet = try { response.body?.string()?.take(300) } catch (_: Exception) { null }
                             Log.d(TAG, "http=${response.code} body=${snippet?.replace(Regex("\\s+"), " ")}")
                             finish(OmniOutcome(error = "http_${response.code}",
                                 detail = snippet?.replace(Regex("\\s+"), " ")?.trim()))
@@ -125,10 +121,14 @@ class OmniAudioJudge(
                                 val root = try { JsonParser.parseString(payload).asJsonObject } catch (_: Exception) { null }
                                 if (root == null) continue
                                 if (root.get("choices") == null) {
-                                    // 流内错误事件：{"code":"...","message":"..."}
-                                    val code = root.get("code")?.let { if (it.isJsonPrimitive) it.asString else null }
-                                    if (!code.isNullOrBlank()) {
-                                        inband = code + " " + (root.get("message")?.let { if (it.isJsonPrimitive) it.asString else null } ?: "")
+                                    // 流内错误事件。百炼的两种形态都要认：
+                                    // {"error":{"code":"...","message":"..."}} 与 {"code":"...","message":"..."}
+                                    val box = root.getAsJsonObject("error") ?: root
+                                    val code = box.get("code")?.let { if (it.isJsonPrimitive) it.asString else null }
+                                    val message = box.get("message")?.let { if (it.isJsonPrimitive) it.asString else null }
+                                    if (!code.isNullOrBlank() || !message.isNullOrBlank()) {
+                                        inband = listOfNotNull(code?.takeIf { it.isNotBlank() }, message)
+                                            .joinToString(" ")
                                         break
                                     }
                                     continue
@@ -148,7 +148,7 @@ class OmniAudioJudge(
                         Log.d(TAG, "model=$model sse=$sawSse inband=$inband len=${hint.length} head=$head")
                         finish(when {
                             hint.isNotEmpty() -> OmniOutcome(hint = hint)
-                            inband != null -> OmniOutcome(error = "api_error", detail = inband.take(160))
+                            inband != null -> OmniOutcome(error = "api_error", detail = inband.take(200))
                             !sawSse -> OmniOutcome(error = "no_sse", detail = head)
                             else -> OmniOutcome(error = "empty_result", detail = head)
                         })
@@ -170,7 +170,8 @@ class OmniAudioJudge(
                     add(JsonObject().apply {
                         addProperty("type", "input_audio")
                         add("input_audio", JsonObject().apply {
-                            addProperty("data", base64Wav)
+                            // 必须带 data URL 前缀，否则稍长的音频会被服务端当成网址解析而报参数错误。
+                            addProperty("data", "data:audio/wav;base64,$base64Wav")
                             addProperty("format", "wav")
                         })
                     })
@@ -217,6 +218,5 @@ class OmniAudioJudge(
         const val DEFAULT_MODEL = "qwen3.5-omni-flash"
         private const val TAG = "Phone10Omni"
         private const val ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-        private val RETRYABLE = setOf("empty_result", "no_sse", "empty_body")
     }
 }

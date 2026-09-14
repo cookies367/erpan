@@ -69,7 +69,7 @@ class VoiceConversation(
                 // 失败时把原因记进诊断日志（短标签 + 服务端错误片段），方便一次定位参数问题。
                 if (omni != null) VoiceDiagnostics.record(
                     if (omni.ok) "omni_ok"
-                    else "omni_failed:" + (omni.error ?: "unknown") + (omni.detail?.let { " " + it.take(80) } ?: ""))
+                    else "omni_failed:" + (omni.error ?: "unknown") + (omni.detail?.let { " " + it.take(200) } ?: ""))
                 pendingPcm = byteArrayOf()
                 report(when {
                     omni != null && !omni.ok -> "听感分析失败（${omni.error ?: "未知"}），已按普通线索提交；等待 Operit 回复…"
