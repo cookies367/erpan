@@ -49,11 +49,11 @@ class OmniAudioJudge(
         .followRedirects(false).followSslRedirects(false)
         .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
-        .callTimeout(16, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
         .build()
 
     suspend fun analyze(pcm: ByteArray): OmniOutcome =
-        withTimeoutOrNull(9000) { analyzeInner(pcm) } ?: OmniOutcome(error = "timeout")
+        withTimeoutOrNull(16000) { analyzeInner(pcm) } ?: OmniOutcome(error = "timeout")
 
     private suspend fun analyzeInner(pcm: ByteArray): OmniOutcome {
         if (apiKey.isBlank()) return OmniOutcome(error = "no_key")
@@ -65,7 +65,8 @@ class OmniAudioJudge(
         }
         // 只请求一次：不带 modalities 的写法已被实测证明必然失败（服务端会把音频当 URL），
         // 保留重试只会让用户说完话后多等几秒。
-        return withTimeoutOrNull(8000) { call(base64Wav, withModalities = true) }
+        // 详细观察报告需要更长生成时间，超时相应放宽。
+        return withTimeoutOrNull(15000) { call(base64Wav, withModalities = true) }
             ?: OmniOutcome(error = "timeout")
     }
 
@@ -136,14 +137,14 @@ class OmniAudioJudge(
                                 val delta = textOf(root)
                                 if (!delta.isNullOrEmpty()) {
                                     text.append(delta)
-                                    // 结论只有一行，攒够字符就没必要再等剩余数据。
-                                    if (text.length >= 48) break
+                                    // 详细观察报告篇幅更长，攒够 400 字再掐断连接。
+                                    if (text.length >= 400) break
                                 }
                             }
                         } catch (_: Exception) {
                             // 自己主动掐断连接会走到这里，属于正常路径。
                         }
-                        val hint = text.toString().trim().take(120)
+                        val hint = text.toString().trim().take(500)
                         val head = raw.toString().replace("\n", " ").trim().take(200)
                         Log.d(TAG, "model=$model sse=$sawSse inband=$inband len=${hint.length} head=$head")
                         finish(when {
@@ -161,7 +162,8 @@ class OmniAudioJudge(
         addProperty("model", model)
         // 百炼要求 Omni 必须流式。
         addProperty("stream", true)
-        addProperty("max_tokens", 96)
+        // 详细的多维度观察报告需要更大的输出预算。
+        addProperty("max_tokens", 500)
         if (withModalities) add("modalities", JsonArray().apply { add("text") })
         add("messages", JsonArray().apply {
             add(JsonObject().apply {
@@ -177,8 +179,12 @@ class OmniAudioJudge(
                     })
                     add(JsonObject().apply {
                         addProperty("type", "text")
-                        addProperty("text", "请用一行中文说明这段录音里说话人的语气情绪和环境背景音，30字以内。" +
-                            "不要解释、不要换行。若没有特殊特征就只写：语气平静。")
+                        addProperty("text", "请完成以下任务：" +
+                            "1）逐字转写用户说出的原话，保留语气词、笑声、哭声、停顿感和是否有撒娇语气或尾音或哭泣喘息；" +
+                            "2）详细描述说话人的音色、语气、语调、语速、音量、停顿、呼吸、笑意；" +
+                            "3）识别说话人的情绪和意图；" +
+                            "4）描述音频中的环境背景音与录音质量。" +
+                            "输出请包含【转写】和【声音/情绪/背景分析】两部分。")
                     })
                 })
             })
