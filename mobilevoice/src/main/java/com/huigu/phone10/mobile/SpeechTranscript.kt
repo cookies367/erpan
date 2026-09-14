@@ -38,15 +38,14 @@ class SpeechTranscript(
             hints += "句段疑似${name}情感（服务商置信度 ${String.format(Locale.ROOT, "%.0f", confidence * 100)}%）"
         }
         if (hints.isEmpty()) return spoken
-        // 以 Operit 官方附件标签块输出，格式对齐系统附件卡片（type=text/plain + 真实 size，
-        // 标签紧跟正文单换行），使其在聊天界面渲染成“耳畔声音线索.txt”附件卡片，
-        // 模型侧等同随消息附带的附件；Operit 做长期记忆归档时会自动剥离该标签块。
+        // 用自定义标记包裹声音线索，由配套 ToolPkg 钩子（erpan-voice-hint）在发送前
+        // 拦截并转换为宿主认可的 <attachment> 标签，从而渲染成真正的附件卡片。
+        // 标记格式：<!--ERPAN_HINT-->纯文本内容<!--/ERPAN_HINT-->
         val body = buildString {
             appendLine("🎙️ 声音线索（自动估计，仅供参考，不代表用户自述）")
             for (hint in hints) appendLine("- " + hint.replace("</attachment>", "").trim())
         }.trimEnd()
-        return "$spoken\n<attachment id=\"erpan-voice-hint\" type=\"text/plain\" " +
-            "filename=\"耳畔声音线索.txt\" size=\"${body.toByteArray(Charsets.UTF_8).size}\">\n$body\n</attachment>"
+        return "$spoken\n<!--ERPAN_HINT-->$body<!--/ERPAN_HINT-->"
     }
 
     companion object {
