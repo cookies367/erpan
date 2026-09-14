@@ -20,7 +20,7 @@ class SpeechTranscriptTest {
             {"begin_time":170,"end_time":295},{"begin_time":295,"end_time":503},
             {"begin_time":803,"end_time":920}]}""")))
         val message = result.forChat(includeVoiceHints = true)
-        assertTrue(message.startsWith("好我知道了\n<attachment"))
+        assertTrue(message.startsWith("好我知道了\n<!--ERPAN_HINT-->"))
         assertTrue(message.contains("0.75 秒"))
         assertTrue(message.contains("0.30 秒"))
         assertFalse(message.contains("情感："))
