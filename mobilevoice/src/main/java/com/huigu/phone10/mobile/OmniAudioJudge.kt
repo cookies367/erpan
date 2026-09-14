@@ -113,7 +113,7 @@ class OmniAudioJudge(
                         try {
                             while (!finished.get()) {
                                 val line = source.readUtf8Line() ?: break
-                                if (raw.length < 400) raw.append(line).append('\n')
+                                if (raw.length < 2000) raw.append(line).append('\n')
                                 if (!line.startsWith("data:")) continue
                                 sawSse = true
                                 val payload = line.removePrefix("data:").trim()
@@ -137,14 +137,14 @@ class OmniAudioJudge(
                                 val delta = textOf(root)
                                 if (!delta.isNullOrEmpty()) {
                                     text.append(delta)
-                                    // 详细观察报告篇幅更长，攒够 400 字再掐断连接。
-                                    if (text.length >= 400) break
+                                    // 放宽截断阈值至 2000，避免详尽报告被中途掐断。
+                                    if (text.length >= 2000) break
                                 }
                             }
                         } catch (_: Exception) {
                             // 自己主动掐断连接会走到这里，属于正常路径。
                         }
-                        val hint = text.toString().trim().take(500)
+                        val hint = text.toString().trim().take(2000)
                         val head = raw.toString().replace("\n", " ").trim().take(200)
                         Log.d(TAG, "model=$model sse=$sawSse inband=$inband len=${hint.length} head=$head")
                         finish(when {
@@ -163,7 +163,7 @@ class OmniAudioJudge(
         // 百炼要求 Omni 必须流式。
         addProperty("stream", true)
         // 详细的多维度观察报告需要更大的输出预算。
-        addProperty("max_tokens", 500)
+        addProperty("max_tokens", 1000)
         if (withModalities) add("modalities", JsonArray().apply { add("text") })
         add("messages", JsonArray().apply {
             add(JsonObject().apply {
