@@ -35,6 +35,12 @@ class CloudSpeech(private val config: SpeechConfig, client: OkHttpClient = OkHtt
         }
     }
 
+    // MiniMax 音色混合试听：走同步 HTTP 接口返回 PCM
+    suspend fun previewTimbre(text: String, onPcm: (ByteArray) -> Unit) {
+        if (config.effectiveTtsProvider != SpeechConfig.MINIMAX) error("仅 MiniMax 支持音色混合试听。")
+        minimax.previewTimbre(text, onPcm)
+    }
+
     suspend fun transcribe(pcm: ByteArray): String {
         require(pcm.isNotEmpty() && pcm.size % 2 == 0 && pcm.size <= 960_000) { "录音数据无效。" }
         if (config.isBailian) return bailian.transcribe(pcm)
@@ -99,7 +105,6 @@ class CloudSpeech(private val config: SpeechConfig, client: OkHttpClient = OkHtt
                 val even = count and -2
                 carry = if (count != even) buffer[count - 1] else null
                 if (even > 0 && active()) {
-                    // Providers must honor response_format=pcm; no decoding or fallback is inferred.
                     onPcm(buffer.copyOf(even))
                     total += even
                 }

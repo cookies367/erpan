@@ -4,13 +4,19 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.net.URI
 
+/** MiniMax 音色混合权重项：一个音色 ID + 一个 1-100 的权重值 */
+data class TimbreWeight(val voiceId: String, val weight: Int = 50)
+
 data class SpeechConfig(val sttBaseUrl: String, val sttKey: String, val sttModel: String,
     val ttsBaseUrl: String, val ttsKey: String, val ttsModel: String, val voice: String,
-    val provider: String? = OPENAI, val ttsProvider: String? = null) {
+    val provider: String? = OPENAI, val ttsProvider: String? = null,
+    // MiniMax 音色混合权重列表，最多 4 项；为 null 或空时走单音色模式
+    val timbreWeights: List<TimbreWeight>? = null) {
     // Gson leaves fields absent from older encrypted settings null.
     val isBailian: Boolean get() = provider == BAILIAN
     val effectiveTtsProvider: String get() = ttsProvider ?: provider ?: OPENAI
     val streamingTts: Boolean get() = effectiveTtsProvider in setOf(BAILIAN, MINIMAX, ELEVENLABS)
+    val hasTimbreWeights: Boolean get() = !timbreWeights.isNullOrEmpty()
 
     fun withTtsProvider(next: String): SpeechConfig {
         if (next == effectiveTtsProvider) return this
@@ -23,7 +29,7 @@ data class SpeechConfig(val sttBaseUrl: String, val sttKey: String, val sttModel
             else -> throw IllegalArgumentException("请选择支持的合成服务。")
         }
         return copy(ttsProvider = next, ttsBaseUrl = defaults.ttsBaseUrl, ttsKey = defaults.ttsKey,
-            ttsModel = defaults.ttsModel, voice = defaults.voice)
+            ttsModel = defaults.ttsModel, voice = defaults.voice, timbreWeights = if (next == MINIMAX) timbreWeights else null)
     }
 
     fun validate() {
@@ -36,11 +42,24 @@ data class SpeechConfig(val sttBaseUrl: String, val sttKey: String, val sttModel
             ELEVENLABS -> base(ttsBaseUrl)
             else -> throw IllegalArgumentException("请选择支持的合成服务。")
         }
-        require(listOf(sttKey, sttModel, ttsKey, ttsModel, voice).all {
+        // 密钥和模型始终必填
+        require(listOf(sttKey, sttModel, ttsKey, ttsModel).all {
             it.isNotBlank() && it.length <= 4096 && '\r' !in it && '\n' !in it
-        }) { "请填写有效的识别和合成密钥、模型及声音。" }
+        }) { "请填写有效的识别和合成密钥及模型。" }
+        // 音色 ID：使用混合权重时可不填（权重列表里有 voice_id）；否则必填
+        if (!hasTimbreWeights) {
+            require(voice.isNotBlank() && voice.length <= 4096 && '\r' !in voice && '\n' !in voice) { "请填写有效的音色 ID。" }
+        }
         require(listOf(sttKey, ttsKey).all { key -> key.all { it.code in 33..126 } }) {
             "语音密钥包含无效字符。"
+        }
+        // 混合权重的合法性检查
+        if (hasTimbreWeights) {
+            require(timbreWeights!!.size in 1..4) { "音色混合最多 4 项。" }
+            timbreWeights.forEach { tw ->
+                require(tw.voiceId.isNotBlank()) { "混合音色 ID 不能为空。" }
+                require(tw.weight in 1..100) { "音色权重须在 1-100 之间。" }
+            }
         }
     }
 
@@ -48,6 +67,13 @@ data class SpeechConfig(val sttBaseUrl: String, val sttKey: String, val sttModel
 
     internal fun sttEndpoint() = endpoint(sttBaseUrl, "transcriptions")
     internal fun ttsEndpoint() = endpoint(ttsBaseUrl, "speech")
+
+    // 把 WebSocket 双向地址转成 HTTP 同步合成地址，用于试听
+    internal fun minimaxHttpSyncEndpoint(): String {
+        val uri = try { URI(ttsBaseUrl.trim()) } catch (_: Exception) { null }
+            ?: throw IllegalArgumentException("MiniMax 地址无效。")
+        return "https://${uri.host}/v1/t2a_v2"
+    }
 
     internal fun minimaxEndpoint(value: String): String {
         val uri = try { URI(value.trim()) } catch (_: Exception) { null }

@@ -184,6 +184,18 @@ class MainActivity : ComponentActivity() {
                 },
                 onDeleteTtsPreset = { index ->
                     draft = draft.copy(ttsPresets = draft.ttsPresets.filterIndexed { i, _ -> i != index })
+                },
+                onPreviewTimbre = { text ->
+                    // 用当前 draft 配置创建 CloudSpeech，调同步试听接口，拿回 PCM 用 PcmPlayer 播放
+                    withContext(Dispatchers.IO) {
+                        val cloud = CloudSpeech(draft.speech)
+                        val player = PcmPlayer {}
+                        try {
+                            // PcmPlayer 只提供 write(bytes) 一个重载，这里必须整块写入
+                            cloud.previewTimbre(text) { pcm -> player.write(pcm) }
+                            player.drain()
+                        } finally { player.close() }
+                    }
                 })
             "about" -> ErpanAbout(onBack = { back() }, onDetails = { kind ->
                 val file = if (kind == "许可说明") "erpan-notices.txt" else "erpan-guide.md"

@@ -6,12 +6,30 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.ByteString
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** Official bidi protocol; one reply owns one task/socket. Never retry submitted text. */
 internal class MiniMaxSpeech(private val config: SpeechConfig, private val sockets: WebSocket.Factory,
     private val timeoutMillis: Long = 600_000) {
+
+    private val http: OkHttpClient = (sockets as? OkHttpClient)
+        ?.newBuilder()?.retryOnConnectionFailure(false)
+            ?.followRedirects(false)?.followSslRedirects(false)
+            ?.connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            ?.readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            ?.callTimeout(60, java.util.concurrent.TimeUnit.SECONDS)?.build()
+        ?: OkHttpClient.Builder()
+            .retryOnConnectionFailure(false).followRedirects(false).followSslRedirects(false)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build()
+
     suspend fun speakStream(texts: ReceiveChannel<String>, onPcm: (ByteArray) -> Unit) {
         val first = texts.receiveCatching().getOrNull() ?: return
         try {
@@ -23,6 +41,83 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
         catch (error: Exception) {
             currentCoroutineContext().ensureActive()
             throw if (error is SpeechApiException) error else SpeechApiException("MiniMax 语音响应无效。")
+        }
+    }
+
+    /** 同步 HTTP 预览合成：用于试听混合音色效果，返回 PCM 字节 */
+    suspend fun previewTimbre(text: String, onPcm: (ByteArray) -> Unit) {
+        require(text.isNotBlank()) { "试听文本不能为空。" }
+        val payload = JsonObject().apply {
+            addProperty("model", config.ttsModel)
+            addProperty("text", text)
+            addProperty("stream", false)
+            // 混合模式：发 timbre_weights 而不是 voice_setting
+            if (config.hasTimbreWeights) {
+                val twArr = com.google.gson.JsonArray()
+                config.timbreWeights!!.forEach { tw ->
+                    twArr.add(JsonObject().apply {
+                        addProperty("voice_id", tw.voiceId)
+                        addProperty("weight", tw.weight)
+                    })
+                }
+                add("timbre_weights", twArr)
+            } else {
+                add("voice_setting", JsonObject().apply { addProperty("voice_id", config.voice) })
+            }
+            add("audio_setting", JsonObject().apply {
+                addProperty("sample_rate", 24_000); addProperty("format", "pcm"); addProperty("channel", 1)
+            })
+            addProperty("output_format", "hex")
+        }
+        val request = Request.Builder().url(config.minimaxHttpSyncEndpoint())
+            .header("Authorization", "Bearer ${config.ttsKey}")
+            .header("Content-Type", "application/json")
+            .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
+
+        suspendCancellableCoroutine { cont ->
+            val call = http.newCall(request)
+            val respRef = AtomicReference<Response?>()
+            cont.invokeOnCancellation { call.cancel(); respRef.getAndSet(null)?.close() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWithException(SpeechApiException("试听请求失败或超时。"))
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    respRef.set(response)
+                    response.use {
+                        try {
+                            if (!cont.isActive) return
+                            if (!response.isSuccessful) {
+                                cont.resumeWithException(SpeechApiException("试听服务返回 HTTP ${response.code}。"))
+                                return
+                            }
+                            val body = response.body?.string()
+                                ?: throw SpeechApiException("试听响应为空。")
+                            val json = JsonParser.parseString(body).asJsonObject
+                            val base = json.getAsJsonObject("base_resp")
+                            val code = base?.get("status_code")?.asInt ?: 0
+                            if (code != 0) {
+                                val msg = base?.get("status_msg")?.asString ?: "未知错误"
+                                cont.resumeWithException(SpeechApiException("MiniMax 试听失败（$code）：$msg"))
+                                return
+                            }
+                            val hex = json.getAsJsonObject("data")?.get("audio")?.asString.orEmpty()
+                            if (hex.isNotEmpty()) {
+                                val bytes = decodeHex(hex)
+                                if (cont.isActive) {
+                                    onPcm(bytes)
+                                    cont.resume(Unit)
+                                }
+                            } else {
+                                cont.resumeWithException(SpeechApiException("试听音频为空。"))
+                            }
+                        } catch (e: Exception) {
+                            if (cont.isActive) cont.resumeWithException(
+                                if (e is SpeechApiException) e else SpeechApiException("试听响应处理失败。"))
+                        } finally { respRef.compareAndSet(response, null) }
+                    }
+                }
+            })
         }
     }
 
@@ -63,7 +158,19 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
                         check(!connected); connected = true
                         send("task_start") {
                             addProperty("model", config.ttsModel)
-                            add("voice_setting", JsonObject().apply { addProperty("voice_id", config.voice) })
+                            // 混合模式：发 timbre_weights 而不是 voice_setting
+                            if (config.hasTimbreWeights) {
+                                val twArr = com.google.gson.JsonArray()
+                                config.timbreWeights!!.forEach { tw ->
+                                    twArr.add(JsonObject().apply {
+                                        addProperty("voice_id", tw.voiceId)
+                                        addProperty("weight", tw.weight)
+                                    })
+                                }
+                                add("timbre_weights", twArr)
+                            } else {
+                                add("voice_setting", JsonObject().apply { addProperty("voice_id", config.voice) })
+                            }
                             add("audio_setting", JsonObject().apply {
                                 addProperty("sample_rate", 24_000); addProperty("format", "pcm"); addProperty("channel", 1)
                             })
@@ -77,8 +184,6 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
                                 require(text.isNotEmpty())
                                 characters += text.length
                                 require(characters <= 60_000)
-                                // Protocol permits at most 10,000 characters per continue. Preserve
-                                // surrogate pairs; server, not this boundary, decides speech sentences.
                                 var begin = 0
                                 while (begin < text.length) {
                                     var end = minOf(begin + 8_000, text.length)
@@ -119,7 +224,6 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
                     carry = if (size == aligned.size) null else aligned.last()
                     if (size > 0) runInterruptible { onPcm(aligned.copyOf(size)) }
                 }
-                // is_final ends one audio request; sentence_end ends one sentence. Neither closes this task.
             }
             throw SpeechApiException("MiniMax 未返回完整的任务结束事件。")
         } finally { events.cancel(); socket?.cancel() }
