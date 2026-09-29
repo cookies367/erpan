@@ -18,12 +18,31 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # 直接用 runner 预装的 Android SDK，避免 setup-android 去拉取已被上游移除的 'tools' 包而失败
+      # 手动把 runner 预装的 cmdline-tools 加入 PATH，并显式启用 ANDROID_HOME。
+      # 不再使用 setup-android：它内部会拉取已被上游移除的 'tools' 包而直接失败。
       - name: Install Android platform and build-tools
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          set -u
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "SDK=$SDK"
+          ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null || true
+          TOOLS_BIN="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | tail -n 1)"
+          if [ -z "$TOOLS_BIN" ]; then
+            echo "::warning::cmdline-tools 未预装，改用 ZIP 安装"
+            mkdir -p "$SDK/cmdline-tools"
+            curl -fsSL -o /tmp/tools.zip https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip
+            unzip -q -o /tmp/tools.zip -d "$SDK/cmdline-tools/tmp"
+            mkdir -p "$SDK/cmdline-tools/latest"
+            mv "$SDK/cmdline-tools/tmp/cmdline-tools/"* "$SDK/cmdline-tools/latest/"
+            rm -rf "$SDK/cmdline-tools/tmp"
+            TOOLS_BIN="$SDK/cmdline-tools/latest/bin"
+          fi
+          echo "$TOOLS_BIN" >> "$GITHUB_PATH"
+          export PATH="$TOOLS_BIN:$PATH"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           sdkmanager --version
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Grant execute permission for gradlew
