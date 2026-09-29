@@ -18,13 +18,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # 直接用 runner 预装的 Android SDK，避免 setup-android 去拉取已被上游移除的 'tools' 包而失败
       - name: Install Android platform and build-tools
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --version
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-          yes | sdkmanager --licenses > /dev/null || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
