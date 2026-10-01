@@ -21,8 +21,8 @@ android {
         applicationId = "com.huigu.phone10.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.3.6"
+        versionCode = 13
+        versionName = "0.3.7"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
