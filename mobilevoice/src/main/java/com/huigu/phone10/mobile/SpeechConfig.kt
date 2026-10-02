@@ -11,7 +11,9 @@ data class SpeechConfig(val sttBaseUrl: String, val sttKey: String, val sttModel
     val ttsBaseUrl: String, val ttsKey: String, val ttsModel: String, val voice: String,
     val provider: String? = OPENAI, val ttsProvider: String? = null,
     // MiniMax 音色混合权重列表，最多 4 项；为 null 或空时走单音色模式
-    val timbreWeights: List<TimbreWeight>? = null) {
+    val timbreWeights: List<TimbreWeight>? = null,
+    // MiniMax 音频参数：音速 0.5-2.0（默认1.0），音调 -12~12（默认0），音量 0.5-2.0（默认1.0）
+    val ttsSpeed: Float = 1.0f, val ttsPitch: Float = 0.0f, val ttsVol: Float = 1.0f) {
     // Gson leaves fields absent from older encrypted settings null.
     val isBailian: Boolean get() = provider == BAILIAN
     val effectiveTtsProvider: String get() = ttsProvider ?: provider ?: OPENAI

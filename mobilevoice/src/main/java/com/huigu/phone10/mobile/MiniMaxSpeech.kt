@@ -67,6 +67,9 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
             add("audio_setting", JsonObject().apply {
                 addProperty("sample_rate", 24_000); addProperty("format", "pcm"); addProperty("channel", 1)
             })
+            addProperty("speed", config.ttsSpeed)
+            addProperty("pitch", config.ttsPitch)
+            addProperty("vol", config.ttsVol)
             addProperty("output_format", "hex")
         }
         val request = Request.Builder().url(config.minimaxHttpSyncEndpoint())
@@ -174,6 +177,9 @@ internal class MiniMaxSpeech(private val config: SpeechConfig, private val socke
                             add("audio_setting", JsonObject().apply {
                                 addProperty("sample_rate", 24_000); addProperty("format", "pcm"); addProperty("channel", 1)
                             })
+                            addProperty("speed", config.ttsSpeed)
+                            addProperty("pitch", config.ttsPitch)
+                            addProperty("vol", config.ttsVol)
                         }
                     }
                     "task_started" -> {

@@ -22,41 +22,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-
-// MiniMax 中文系统音色预设列表（voice_id → 中文名）
-private val MINIMAX_CN_VOICES = listOf(
-    "male-qn-qingse" to "青年男声·清澈",
-    "male-qn-jingying" to "青年精英男声",
-    "male-qn-badao" to "青年霸道男声",
-    "male-qn-daxuesheng" to "青年大学生男声",
-    "female-shaonv" to "少女音",
-    "female-yujie" to "御姐女声",
-    "female-chengshu" to "成熟女声",
-    "female-tianmei" to "甜美女声",
-    "male-qn-qingse-jingpin" to "清澈男声·精品",
-    "male-qn-jingying-jingpin" to "精英男声·精品",
-    "male-qn-badao-jingpin" to "霸道男声·精品",
-    "male-qn-daxuesheng-jingpin" to "大学生男声·精品",
-    "female-shaonv-jingpin" to "少女音·精品",
-    "female-yujie-jingpin" to "御姐女声·精品",
-    "female-chengshu-jingpin" to "成熟女声·精品",
-    "female-tianmei-jingpin" to "甜美女声·精品",
-    "clever" to "机灵",
-    "cute" to "可爱",
-    "lovely" to "甜美",
-    "cartoon" to "卡通",
-    "bingjiao" to "病娇",
-    "junlang" to "俊朗",
-    "chunzhen" to "纯真",
-    "lengdan" to "冷淡",
-    "badao" to "霸道",
-    "tianxin" to "甜心",
-    "qiaopi" to "俏皮",
-    "wumei" to "妩媚",
-    "diadia" to "嗲嗲",
-    "danya" to "淡雅",
-)
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable internal fun ErpanConfig(settings: MobileSettings, enabled: Boolean, listing: Boolean, notice: String,
@@ -65,7 +30,9 @@ private val MINIMAX_CN_VOICES = listOf(
     onSaveSttPreset: (String) -> Unit, onApplySttPreset: (Int) -> Unit, onDeleteSttPreset: (Int) -> Unit,
     onSaveTtsPreset: (String) -> Unit, onApplyTtsPreset: (Int) -> Unit, onDeleteTtsPreset: (Int) -> Unit,
     // MiniMax 音色混合试听回调：传入试听文本，返回 PCM 给调用方播放
-    onPreviewTimbre: (suspend (String) -> Unit)? = null) {
+    onPreviewTimbre: (suspend (String) -> Unit)? = null,
+    // 打开音色调试室
+    onOpenStudio: () -> Unit = {}) {
     val voiceTarget = remember { BringIntoViewRequester() }
     val judgeTarget = remember { BringIntoViewRequester() }
     LaunchedEffect(target) {
@@ -160,16 +127,11 @@ private val MINIMAX_CN_VOICES = listOf(
                     Hint("名称仅用于首页显示，不改变音色。音色 ID 须匹配所选服务和模型。")
                 }
 
-                // MiniMax 音色混合面板
+                // MiniMax 音色混合面板（入口按钮，跳转到独立调试室）
                 if (ttsProvider == SpeechConfig.MINIMAX) {
                     ConfigDivider()
-                    TimbreMixPanel(
-                        settings = settings,
-                        speech = speech,
-                        enabled = enabled,
-                        onChange = onChange,
-                        onPreviewTimbre = onPreviewTimbre,
-                    )
+                    ErpanNavigationCard("🎵 音色调试室", subtitle = "选择、混合与试听系统音色",
+                        enabled = enabled, onClick = onOpenStudio)
                 }
 
                 ConfigDivider()
@@ -193,180 +155,6 @@ private val MINIMAX_CN_VOICES = listOf(
                 modifier = Modifier.fillMaxWidth().padding(top = 7.dp).heightIn(min = 50.dp)) { Text("保存配置", fontSize = 17.sp) }
             Hint("密钥加密保存在本机。识别、合成及可选判断的费用由相应服务商结算。")
             TextButton(onClick = onAbout, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("关于耳畔") }
-        }
-    }
-}
-
-// ===== MiniMax 音色混合面板 =====
-@Composable private fun TimbreMixPanel(
-    settings: MobileSettings,
-    speech: SpeechConfig,
-    enabled: Boolean,
-    onChange: (MobileSettings) -> Unit,
-    onPreviewTimbre: (suspend (String) -> Unit)?,
-) {
-    var mixEnabled by remember { mutableStateOf(speech.hasTimbreWeights) }
-    // 从已有配置恢复权重列表，或初始化为空列表
-    var weights by remember(speech.timbreWeights) {
-        mutableStateOf(speech.timbreWeights ?: emptyList())
-    }
-    var previewText by remember { mutableStateOf("你好，这是音色混合的试听效果。") }
-    var previewStatus by remember { mutableStateOf("") }
-    var previewing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("系统音色混合", fontSize = 14.sp)
-            Hint("开启后可混合最多 4 个 MiniMax 中文系统音色，按权重融合成新声音。")
-        }
-        Switch(
-            checked = mixEnabled,
-            enabled = enabled,
-            onCheckedChange = { on ->
-                mixEnabled = on
-                if (on && weights.isEmpty()) {
-                    // 默认加一行
-                    weights = listOf(TimbreWeight(MINIMAX_CN_VOICES[0].first, 50))
-                }
-                val newSpeech = if (on) speech.copy(timbreWeights = weights) else speech.copy(timbreWeights = null)
-                onChange(settings.copy(speech = newSpeech))
-            },
-        )
-    }
-
-    if (mixEnabled) {
-        Spacer(Modifier.height(8.dp))
-        weights.forEachIndexed { index, tw ->
-            TimbreWeightRow(
-                index = index,
-                selected = tw.voiceId,
-                weight = tw.weight,
-                enabled = enabled,
-                voices = MINIMAX_CN_VOICES,
-                canRemove = weights.size > 1,
-                onVoiceChange = { newVoiceId ->
-                    weights = weights.toMutableList().also { it[index] = TimbreWeight(newVoiceId, tw.weight) }
-                    onChange(settings.copy(speech = speech.copy(timbreWeights = weights)))
-                },
-                onWeightChange = { newWeight ->
-                    weights = weights.toMutableList().also { it[index] = TimbreWeight(tw.voiceId, newWeight) }
-                    onChange(settings.copy(speech = speech.copy(timbreWeights = weights)))
-                },
-                onRemove = {
-                    weights = weights.toMutableList().also { it.removeAt(index) }
-                    onChange(settings.copy(speech = speech.copy(timbreWeights = weights)))
-                },
-            )
-            if (index < weights.lastIndex) Spacer(Modifier.height(10.dp))
-        }
-
-        // 添加按钮（最多 4 个）
-        if (weights.size < 4) {
-            TextButton(enabled = enabled, onClick = {
-                val nextVoice = MINIMAX_CN_VOICES.firstOrNull { it.first !in weights.map { w -> w.voiceId } }?.first
-                    ?: MINIMAX_CN_VOICES[0].first
-                weights = weights + TimbreWeight(nextVoice, 50)
-                onChange(settings.copy(speech = speech.copy(timbreWeights = weights)))
-            }) { Text("+ 添加音色（${weights.size}/4）", fontSize = 14.sp) }
-        }
-
-        Spacer(Modifier.height(10.dp))
-        // 试听区域
-        OutlinedTextField(
-            value = previewText,
-            onValueChange = { previewText = it },
-            enabled = enabled && !previewing,
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "试听文本" },
-            label = { Text("试听文本", fontSize = 13.sp) },
-            shape = RoundedCornerShape(9.dp),
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedBorderColor = ErpanColors.Line,
-                focusedBorderColor = ErpanColors.Rose,
-            ),
-        )
-        Spacer(Modifier.height(8.dp))
-        Button(
-            onClick = {
-                if (onPreviewTimbre != null && !previewing) {
-                    previewing = true
-                    previewStatus = "正在合成试听…"
-                    scope.launch {
-                        try {
-                            onPreviewTimbre?.invoke(previewText)
-                            previewStatus = "试听播放完毕"
-                        } catch (e: Exception) {
-                            previewStatus = "试听失败：${e.message ?: "未知错误"}"
-                        }
-                        previewing = false
-                    }
-                }
-            },
-            enabled = enabled && !previewing && weights.isNotEmpty(),
-            shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
-        ) { Text(if (previewing) "合成中…" else "▶ 试听混合效果", fontSize = 15.sp) }
-        if (previewStatus.isNotBlank()) {
-            Text(previewStatus, fontSize = 12.sp, color = if (previewStatus.contains("失败")) ErpanColors.Rose else ErpanColors.Muted,
-                modifier = Modifier.padding(top = 4.dp))
-        }
-    }
-}
-
-// 单行音色权重控件：下拉选音色 + 滑杆调权重 + 删除按钮
-@Composable private fun TimbreWeightRow(
-    index: Int,
-    selected: String,
-    weight: Int,
-    enabled: Boolean,
-    voices: List<Pair<String, String>>,
-    canRemove: Boolean,
-    onVoiceChange: (String) -> Unit,
-    onWeightChange: (Int) -> Unit,
-    onRemove: () -> Unit,
-) {
-    var dropdownOpen by remember { mutableStateOf(false) }
-    val voiceName = voices.firstOrNull { it.first == selected }?.second ?: selected
-    Surface(color = ErpanColors.Paper, shape = RoundedCornerShape(9.dp),
-        border = BorderStroke(0.8.dp, ErpanColors.Line), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("音色 ${index + 1}", fontSize = 13.sp, color = ErpanColors.Muted, modifier = Modifier.width(52.dp))
-                Box(Modifier.weight(1f)) {
-                    Surface(onClick = { dropdownOpen = true }, enabled = enabled, color = ErpanColors.Paper,
-                        shape = RoundedCornerShape(7.dp), border = BorderStroke(0.6.dp, ErpanColors.Line)) {
-                        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(voiceName, Modifier.weight(1f), fontSize = 14.sp)
-                            LineIcon(ErpanIcon.DOWN, ErpanColors.Muted, Modifier.size(15.dp))
-                        }
-                    }
-                    DropdownMenu(dropdownOpen, onDismissRequest = { dropdownOpen = false }) {
-                        voices.forEach { (id, name) ->
-                            DropdownMenuItem(text = { Text(name, fontSize = 14.sp) }, onClick = {
-                                dropdownOpen = false; onVoiceChange(id)
-                            })
-                        }
-                    }
-                }
-                if (canRemove) {
-                    IconButton(onClick = onRemove, enabled = enabled, modifier = Modifier.size(32.dp)) {
-                        Text("✕", fontSize = 16.sp, color = ErpanColors.Rose)
-                    }
-                }
-            }
-            // 权重滑杆
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("权重", fontSize = 12.sp, color = ErpanColors.Muted, modifier = Modifier.width(52.dp))
-                Slider(
-                    value = weight.toFloat(),
-                    onValueChange = { onWeightChange(it.toInt().coerceIn(1, 100)) },
-                    enabled = enabled,
-                    valueRange = 1f..100f,
-                    modifier = Modifier.weight(1f),
-                )
-                Text("$weight", fontSize = 13.sp, modifier = Modifier.width(32.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
-            }
         }
     }
 }

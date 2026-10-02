@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
         fun back() {
             when (page) {
                 "about" -> page = aboutReturn
+                "studio" -> page = "config"
                 "config" -> if (draft != saved) askSave = true else { page = "home"; notice = "" }
             }
         }
@@ -196,7 +197,8 @@ class MainActivity : ComponentActivity() {
                             player.drain()
                         } finally { player.close() }
                     }
-                })
+                },
+                onOpenStudio = { page = "studio" })
             "about" -> ErpanAbout(onBack = { back() }, onDetails = { kind ->
                 val file = if (kind == "许可说明") "erpan-notices.txt" else "erpan-guide.md"
                 scope.launch {
@@ -205,6 +207,20 @@ class MainActivity : ComponentActivity() {
                     dialog = kind to text
                 }
             })
+            "studio" -> TimbreStudio(
+                speech = draft.speech,
+                onBack = { page = "config" },
+                onChange = { newSpeech -> draft = draft.copy(speech = newSpeech) },
+                onPreviewTimbre = { text ->
+                    withContext(Dispatchers.IO) {
+                        val cloud = CloudSpeech(draft.speech)
+                        val player = PcmPlayer {}
+                        try {
+                            cloud.previewTimbre(text) { pcm -> player.write(pcm) }
+                            player.drain()
+                        } finally { player.close() }
+                    }
+                })
             else -> ErpanHome(saved, state, avatar, busy, notice,
                 onStart = { requestStart() }, onEnd = { stopService(Intent(this@MainActivity, VoiceService::class.java)) },
                 onMic = { if (state.running && !state.changing) startService(Intent(this@MainActivity, VoiceService::class.java).setAction(VoiceService.TOGGLE)) },
