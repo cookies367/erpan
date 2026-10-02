@@ -22,7 +22,6 @@ import kotlinx.coroutines.launch
  * 音色调试室：全屏独立界面。
  * 顶部分类标签选语言 → 搜索框筛选 → 网格卡片选音色（最多4个）→ 底部调音台（权重/音速/音调/音量/试听）
  */
-@OptIn(androidx.compose.foundation.lazy.grid.LazyGridScope::class)
 @Composable
 internal fun TimbreStudio(
     speech: SpeechConfig,
